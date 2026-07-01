@@ -7,101 +7,139 @@ dotenv.config();
 
 const app = express();
 
-// Разрешаем массив доменов
-const allowedOrigins = ['http://hyap.com', 'https://hyap.com', 'http://xn--80azkk.com', 'https://xn--80azkk.com'];
+// ==========================================================================
+// 1. Настройка CORS (Разрешаем запросы с обоих вариантов вашего домена)
+// ==========================================================================
+const allowedOrigins = [
+    'http://hyap.com', 
+    'https://hyap.com', 
+    'http://xn--80azkk.com', 
+    'https://xn--80azkk.com'
+];
 
 const corsOptions = {
     origin: function (origin, callback) {
-        // Разрешаем запросы без origin (например, Postman) или если домен есть в массиве
+        // Разрешаем запросы без origin (например, локальный Postman) или если домен есть в массиве
         if (!origin || allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
-            callback(new Error('Блокировка CORS: данный домен не поддерживается.'));
+            console.log(`❌ Блокировка CORS для домена: ${origin}`);
+            callback(new Error('Блокировка CORS: данный домен не поддерживается сервером.'));
         }
     },
     optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
 
-// Middleware для проверки секретного Bearer-токена в заголовках
+// ==========================================================================
+// 2. Парсер JSON (Обязательно должен стоять ВЫШЕ всех эндпоинтов app.post)
+// ==========================================================================
+app.use(express.json());
+
+// ==========================================================================
+// 3. Middleware для проверки секретного Bearer-токена авторизации
+// ==========================================================================
 const authenticateRequest = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.log("❌ Отклонено: отсутствует токен авторизации в headers");
         return res.status(401).json({ error: 'Доступ запрещен. Отсутствует токен авторизации.' });
     }
 
-    const token = authHeader.split(' ')[1];
+    const token = authHeader.split(' ')[1]; // Получаем сам токен после слова Bearer
     
     if (token !== process.env.API_SECRET_KEY) {
+        console.log("❌ Отклонено: неверный секретный API-ключ");
         return res.status(403).json({ error: 'Неверный токен авторизации.' });
     }
 
-    next();
+    next(); // Если проверка пройдена, передаем запрос к эндпоинту
 };
 
-// Конфигурация SMTP транспорта для Nodemailer
+// ==========================================================================
+// 4. Конфигурация SMTP транспорта Nodemailer под Gmail
+// ==========================================================================
 const transporter = nodemailer.createTransport({
-    service: 'gmail', // Добавляем эту строчку, чтобы Nodemailer сам применил нужные SSL/TLS флаги для Google
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT),
+    service: 'gmail', // Принудительно указывает Nodemailer использовать настройки Google
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '465'),
     secure: true, // true для порта 465
     auth: {
         user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS 
+        pass: process.env.SMTP_PASS // Ваш 16-значный пароль приложения без пробелов
     }
 });
 
+// На всякий случай проверяем SMTP-подключение при старте сервера
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ ОШИБКА НАСТРОЙКИ SMTP (GMAIL):', error.message);
+    } else {
+        console.log('✅ SMTP-сервер Gmail успешно готов к отправке писем');
+    }
+});
 
-// Защищенный эндпоинт для приема заявок
+// ==========================================================================
+// 5. Защищенный эндпоинт отправки заявок
+// ==========================================================================
 app.post('/api/send-lead', authenticateRequest, async (req, res) => {
-    // 1. Выводим в лог то, что пришло с фронтенда
     console.log("==> ПОЛУЧЕНА ЗАЯВКА С ФРОНТЕНДА:", req.body);
 
     const { name, phone, car, comment } = req.body;
 
+    // Базовая валидация на наличие обязательных полей
     if (!name || !phone) {
-        console.log("❌ Ошибка: отсутствует Имя или Телефон");
+        console.log("❌ Отклонено: в теле запроса нет имени или телефона");
         return res.status(400).json({ error: 'Имя и телефон обязательны для заполнения.' });
     }
 
+    // Красивый HTML-шаблон для вывода на вашей почте
     const htmlTemplate = `
-        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f9f9f9; border: 1px solid #ddd;">
-            <h2 style="color: #141414; border-bottom: 2px solid #141414; padding-bottom: 10px;">
+        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f9f9f9; border: 1px solid #ddd; max-width: 600px; margin: 0 auto; border-radius: 4px;">
+            <h2 style="color: #141414; border-bottom: 2px solid #141414; padding-bottom: 10px; margin-top: 0;">
                 🔥 Новая заявка на детейлинг (HYAP.COM)
             </h2>
-            <p style="font-size: 14px;"><strong>Имя клиента:</strong> ${name}</p>
-            <p style="font-size: 14px;"><strong>Телефон:</strong> ${phone}</p>
-            ${car ? `<p style="font-size: 14px;"><strong>Автомобиль:</strong> ${car}</p>` : ''}
-            ${comment ? `<p style="font-size: 14px;"><strong>Комментарий:</strong> ${comment}</p>` : ''}
+            <p style="font-size: 15px; margin: 10px 0;"><strong>Имя клиента:</strong> ${name}</p>
+            <p style="font-size: 15px; margin: 10px 0;"><strong>Телефон:</strong> ${phone}</p>
+            ${car ? `<p style="font-size: 15px; margin: 10px 0;"><strong>Автомобиль:</strong> ${car}</p>` : ''}
+            ${comment ? `<p style="font-size: 15px; margin: 10px 0;"><strong>Комментарий:</strong> ${comment}</p>` : ''}
+            <br />
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+            <span style="font-size: 11px; color: #999;">Сообщение сгенерировано автоматически защищенным бэкендом.</span>
         </div>
     `;
 
     const mailOptions = {
-        from: `"Робот HYAP" <${process.env.SMTP_USER}>`,
-        to: process.env.EMAIL_TO,
+        from: `"Робот HYAP" <${process.env.SMTP_USER}>`, // От кого (ваш ящик Gmail)
+        to: process.env.EMAIL_TO, // Кому присылать уведомления
         subject: `Новая заявка: ${name} (${phone})`,
         html: htmlTemplate
     };
 
     try {
-        console.log("⏳ Пытаемся отправить письмо через SMTP Gmail...");
+        console.log("⏳ Отправка письма по SMTP на Gmail...");
         
-        // 2. Отправляем письмо по SMTP
+        // Отправляем письмо
         let info = await transporter.sendMail(mailOptions);
         
-        console.log("✅ Письмо успешно отправлено! ID сообщения:", info.messageId);
+        console.log("✅ Письмо успешно отправлено! ID:", info.messageId);
         return res.status(200).json({ success: true, message: 'Заявка успешно отправлена на почту.' });
     } catch (error) {
-        // 3. Выводим КРИТИЧЕСКУЮ ошибку SMTP в логи Render, чтобы мы её увидели
-        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА ВНУТРИ NODEMAILER:', error.message);
-        console.error(error); // Вывод полного стека ошибки
-        
+        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА SMTP ПРИ ОТПРАВКЕ ПИСЬМА:', error.message);
         return res.status(502).json({ error: `Не удалось отправить письмо по SMTP: ${error.message}` });
     }
 });
 
+// Базовый эндпоинт для проверки работоспособности в браузере (Health Check)
+app.get('/', (req, res) => {
+    res.send('Бэкенд HYAP.COM успешно запущен и работает в штатном режиме.');
+});
+
+// ==========================================================================
+// 6. Запуск сервера
+// ==========================================================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`Защищенный SMTP-бэкенд запущен на порту ${PORT}`);
+    console.log(`🚀 Защищенный SMTP-бэкенд запущен на порту ${PORT}`);
 });
