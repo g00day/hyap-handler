@@ -61,16 +61,19 @@ const authenticateRequest = (req, res, next) => {
 // 4. Конфигурация SMTP транспорта Nodemailer под Gmail
 // ==========================================================================
 const transporter = nodemailer.createTransport({
-    service: 'gmail', // Принудительно указывает Nodemailer использовать настройки Google
+    service: 'gmail',
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '465'),
-    secure: true, // true для порта 465
+    port: parseInt(process.env.SMTP_PORT || '587'), // Используем 587 порт
+    secure: false, // На порту 587 secure ОБЯЗАТЕЛЬНО должно быть false
+    tls: {
+        rejectUnauthorized: false, // Игнорируем возможные проблемы с SSL-сертификатами хостинга
+        ciphers: 'SSLv3'
+    },
     auth: {
         user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS // Ваш 16-значный пароль приложения без пробелов
+        pass: process.env.SMTP_PASS 
     }
 });
-
 // На всякий случай проверяем SMTP-подключение при старте сервера
 transporter.verify((error, success) => {
     if (error) {
