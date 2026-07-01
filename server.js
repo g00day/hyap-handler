@@ -7,13 +7,21 @@ dotenv.config();
 
 const app = express();
 
-// Защита CORS: принимаем запросы только с адреса нашего фронтенда
+// Разрешаем массив доменов
+const allowedOrigins = ['http://hyap.com', 'https://hyap.com', 'http://xn--80azkk.com', 'https://xn--80azkk.com'];
+
 const corsOptions = {
-    origin: process.env.FRONTEND_URL, 
+    origin: function (origin, callback) {
+        // Разрешаем запросы без origin (например, Postman) или если домен есть в массиве
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('Блокировка CORS: данный домен не поддерживается.'));
+        }
+    },
     optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
-app.use(express.json());
 
 // Middleware для проверки секретного Bearer-токена в заголовках
 const authenticateRequest = (req, res, next) => {
