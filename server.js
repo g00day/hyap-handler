@@ -55,13 +55,16 @@ const transporter = nodemailer.createTransport({
 
 // Защищенный эндпоинт для приема заявок
 app.post('/api/send-lead', authenticateRequest, async (req, res) => {
-    const { name, phone, car, comment } = req.body; // Принимаем все возможные поля из форм
+    // 1. Выводим в лог то, что пришло с фронтенда
+    console.log("==> ПОЛУЧЕНА ЗАЯВКА С ФРОНТЕНДА:", req.body);
+
+    const { name, phone, car, comment } = req.body;
 
     if (!name || !phone) {
+        console.log("❌ Ошибка: отсутствует Имя или Телефон");
         return res.status(400).json({ error: 'Имя и телефон обязательны для заполнения.' });
     }
 
-    // Оформляем красивое HTML-письмо для почты
     const htmlTemplate = `
         <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f9f9f9; border: 1px solid #ddd;">
             <h2 style="color: #141414; border-bottom: 2px solid #141414; padding-bottom: 10px;">
@@ -71,24 +74,30 @@ app.post('/api/send-lead', authenticateRequest, async (req, res) => {
             <p style="font-size: 14px;"><strong>Телефон:</strong> ${phone}</p>
             ${car ? `<p style="font-size: 14px;"><strong>Автомобиль:</strong> ${car}</p>` : ''}
             ${comment ? `<p style="font-size: 14px;"><strong>Комментарий:</strong> ${comment}</p>` : ''}
-            <br />
         </div>
     `;
 
     const mailOptions = {
-        from: `"Робот HYAP" <${process.env.SMTP_USER}>`, // От кого (ваш ящик авторизации)
-        to: process.env.EMAIL_TO, // Кому присылать уведомление
-        subject: `Новая заявка: ${name} (${phone})`, // Тема письма
-        html: htmlTemplate // Тело письма в формате HTML
+        from: `"Робот HYAP" <${process.env.SMTP_USER}>`,
+        to: process.env.EMAIL_TO,
+        subject: `Новая заявка: ${name} (${phone})`,
+        html: htmlTemplate
     };
 
     try {
-        // Отправка по SMTP протоколу
-        await transporter.sendMail(mailOptions);
+        console.log("⏳ Пытаемся отправить письмо через SMTP Gmail...");
+        
+        // 2. Отправляем письмо по SMTP
+        let info = await transporter.sendMail(mailOptions);
+        
+        console.log("✅ Письмо успешно отправлено! ID сообщения:", info.messageId);
         return res.status(200).json({ success: true, message: 'Заявка успешно отправлена на почту.' });
     } catch (error) {
-        console.error('Ошибка Nodemailer SMTP:', error);
-        return res.status(502).json({ error: 'Не удалось отправить письмо по SMTP.' });
+        // 3. Выводим КРИТИЧЕСКУЮ ошибку SMTP в логи Render, чтобы мы её увидели
+        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА ВНУТРИ NODEMAILER:', error.message);
+        console.error(error); // Вывод полного стека ошибки
+        
+        return res.status(502).json({ error: `Не удалось отправить письмо по SMTP: ${error.message}` });
     }
 });
 
