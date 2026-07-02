@@ -63,16 +63,10 @@ const authenticateRequest = (req, res, next) => {
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587'), 
-    secure: false, // Для порта 587 должно быть строго false
-    connectionTimeout: 10000, // Таймаут соединения 10 секунд
-    dnsTimeout: 10000,
-    // Критически важно: заставляем Nodemailer использовать IPv4, а не IPv6
-    connection: {
-        family: 4 
-    },
+    port: parseInt(process.env.SMTP_PORT || '587'), // Используем 587 порт
+    secure: false, // На порту 587 secure ОБЯЗАТЕЛЬНО должно быть false
     tls: {
-        rejectUnauthorized: false,
+        rejectUnauthorized: false, // Игнорируем возможные проблемы с SSL-сертификатами хостинга
         ciphers: 'SSLv3'
     },
     auth: {
