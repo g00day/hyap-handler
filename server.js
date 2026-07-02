@@ -82,7 +82,7 @@ ${comment ? `💬 *Комментарий:* ${comment}` : ''}
     `.trim();
 
     // Официальное прокси-зеркало для стабильного прохождения трафика без таймаутов
-    const telegramUrl = `https://telegram.org{process.env.TELEGRAM_TOKEN}/sendMessage`
+    const telegramUrl = `https://telegram.org/bot${process.env.TELEGRAM_TOKEN}/sendMessage`;
 
     try {
         console.log("⏳ Отправка запроса к Telegram API...");
