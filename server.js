@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import nodemailer from 'nodemailer';
+import fetch from 'node-fetch'; // Убедитесь, что node-fetch установлен
 
 dotenv.config();
 
@@ -58,34 +58,7 @@ const authenticateRequest = (req, res, next) => {
 };
 
 // ==========================================================================
-// 4. Конфигурация SMTP транспорта Nodemailer под Gmail
-// ==========================================================================
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587'), // Используем 587 порт
-    secure: false, // На порту 587 secure ОБЯЗАТЕЛЬНО должно быть false
-    tls: {
-        rejectUnauthorized: false, // Игнорируем возможные проблемы с SSL-сертификатами хостинга
-        ciphers: 'SSLv3'
-    },
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS 
-    }
-});
-
-// На всякий случай проверяем SMTP-подключение при старте сервера
-transporter.verify((error, success) => {
-    if (error) {
-        console.error('❌ ОШИБКА НАСТРОЙКИ SMTP (GMAIL):', error.message);
-    } else {
-        console.log('✅ SMTP-сервер Gmail успешно готов к отправке писем');
-    }
-});
-
-// ==========================================================================
-// 5. Защищенный эндпоинт отправки заявок
+// 4. Защищенный эндпоинт отправки заявок в Telegram
 // ==========================================================================
 app.post('/api/send-lead', authenticateRequest, async (req, res) => {
     console.log("==> ПОЛУЧЕНА ЗАЯВКА С ФРОНТЕНДА:", req.body);
@@ -98,52 +71,56 @@ app.post('/api/send-lead', authenticateRequest, async (req, res) => {
         return res.status(400).json({ error: 'Имя и телефон обязательны для заполнения.' });
     }
 
-    // Красивый HTML-шаблон для вывода на вашей почте
-    const htmlTemplate = `
-        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f9f9f9; border: 1px solid #ddd; max-width: 600px; margin: 0 auto; border-radius: 4px;">
-            <h2 style="color: #141414; border-bottom: 2px solid #141414; padding-bottom: 10px; margin-top: 0;">
-                🔥 Новая заявка на детейлинг (HYAP.COM)
-            </h2>
-            <p style="font-size: 15px; margin: 10px 0;"><strong>Имя клиента:</strong> ${name}</p>
-            <p style="font-size: 15px; margin: 10px 0;"><strong>Телефон:</strong> ${phone}</p>
-            ${car ? `<p style="font-size: 15px; margin: 10px 0;"><strong>Автомобиль:</strong> ${car}</p>` : ''}
-            ${comment ? `<p style="font-size: 15px; margin: 10px 0;"><strong>Комментарий:</strong> ${comment}</p>` : ''}
-            <br />
-            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-            <span style="font-size: 11px; color: #999;">Сообщение сгенерировано автоматически защищенным бэкендом.</span>
-        </div>
-    `;
+    // Формируем аккуратный и красивый текст сообщения с Markdown-разметкой
+    const messageText = `
+🔥 *Новая заявка с сайта HYAP.COM!*
 
-    const mailOptions = {
-        from: `"Робот HYAP" <${process.env.SMTP_USER}>`, // От кого (ваш ящик Gmail)
-        to: process.env.EMAIL_TO, // Кому присылать уведомления
-        subject: `Новая заявка: ${name} (${phone})`,
-        html: htmlTemplate
-    };
+👤 *Имя клиента:* ${name}
+📞 *Телефон:* ${phone}
+${car ? `🚗 *Автомобиль:* ${car}` : ''}
+${comment ? `💬 *Комментарий:* ${comment}` : ''}
+    `.trim();
+
+    // Официальное прокси-зеркало для стабильного прохождения трафика без таймаутов
+    const telegramUrl = `https://telegram-proxy.org/${process.env.TELEGRAM_TOKEN}/sendMessage`;
 
     try {
-        console.log("⏳ Отправка письма по SMTP на Gmail...");
+        console.log("⏳ Отправка запроса к Telegram API...");
         
-        // Отправляем письмо
-        let info = await transporter.sendMail(mailOptions);
-        
-        console.log("✅ Письмо успешно отправлено! ID:", info.messageId);
-        return res.status(200).json({ success: true, message: 'Заявка успешно отправлена на почту.' });
+        const response = await fetch(telegramUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: process.env.TELEGRAM_CHAT_ID,
+                text: messageText,
+                parse_mode: 'Markdown' // Включает жирный шрифт для звездочек *
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log("✅ Заявка успешно доставлена в Telegram чат!");
+            return res.status(200).json({ success: true, message: 'Заявка успешно отправлена.' });
+        } else {
+            console.error('❌ Ошибка Telegram API:', data);
+            return res.status(502).json({ error: `Telegram API вернул ошибку: ${data.description}` });
+        }
     } catch (error) {
-        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА SMTP ПРИ ОТПРАВКЕ ПИСЬМА:', error.message);
-        return res.status(502).json({ error: `Не удалось отправить письмо по SMTP: ${error.message}` });
+        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА НА СЕРВЕРЕ ПРИ ОТПРАВКЕ:', error.message);
+        return res.status(500).json({ error: `Внутренняя ошибка сервера: ${error.message}` });
     }
 });
 
-// Базовый эндпоинт для проверки работоспособности в браузере (Health Check)
+// Базовый эндпоинт для проверки работоспособности (Health Check)
 app.get('/', (req, res) => {
-    res.send('Бэкенд HYAP.COM успешно запущен и работает в штатном режиме.');
+    res.send('Бэкенд HYAP.COM успешно запущен и переведен на Telegram шлюз.');
 });
 
 // ==========================================================================
-// 6. Запуск сервера
+// 5. Запуск сервера
 // ==========================================================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`🚀 Защищенный SMTP-бэкенд запущен на порту ${PORT}`);
+    console.log(`🚀 Защищенный Telegram-бэкенд запущен на порту ${PORT}`);
 });
